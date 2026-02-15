@@ -137,15 +137,49 @@ export class Reasoner {
         throw new Error(`Letta ${res.status}: ${body}`);
       }
 
-      const data = (await res.json()) as {
-        messages: Array<{
-          message_type?: string;
-          role?: string;
-          content?: string;
-          text?: string;
-          assistant_message?: string;
-        }>;
-      };
+      interface LettaMessage {
+        message_type?: string;
+        role?: string;
+        content?: string;
+        text?: string;
+        assistant_message?: string;
+        tool_call?: { name?: string; arguments?: string };
+        tool_return?: string;
+      }
+
+      const data = (await res.json()) as { messages: LettaMessage[] };
+
+      // Log tool calls for observability
+      for (const msg of data.messages ?? []) {
+        if (msg.message_type === 'tool_call_message' && msg.tool_call) {
+          const toolName = msg.tool_call.name ?? 'unknown';
+          logger.info({ tool: toolName }, 'Reasoner called tool');
+
+          // Track mission submissions
+          if (toolName === 'execute_mission') {
+            this.belief.conversation.phase = 'action';
+          }
+        }
+        if (msg.message_type === 'tool_return_message' && msg.tool_return) {
+          const ret = msg.tool_return;
+          logger.debug({ returnPreview: ret.slice(0, 200) }, 'Tool returned');
+
+          // If execute_mission succeeded, extract mission_id
+          if (ret.includes('mission_id') && !ret.startsWith('ERROR')) {
+            try {
+              const parsed = JSON.parse(ret);
+              if (parsed.mission_id) {
+                this.belief.pendingActions.push({
+                  type: 'mission',
+                  id: parsed.mission_id,
+                  status: parsed.status ?? 'submitted',
+                });
+                logger.info({ missionId: parsed.mission_id }, 'Mission submitted via Reasoner');
+              }
+            } catch { /* non-JSON return */ }
+          }
+        }
+      }
 
       // Letta v1 uses message_type='assistant_message' with content field
       for (const msg of data.messages ?? []) {

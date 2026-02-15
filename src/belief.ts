@@ -21,7 +21,7 @@ export interface BeliefState {
     turnsInPhase: number;
     summary: string;
   };
-  pendingActions: string[];
+  pendingActions: Array<{ type: string; id: string; status: string }>;
   lastReasonerUpdate: string;
 }
 
@@ -69,7 +69,10 @@ export function beliefToPrompt(belief: BeliefState): string {
   }
 
   if (belief.pendingActions.length > 0) {
-    parts.push(`Pending actions: ${belief.pendingActions.join(', ')}.`);
+    const actionDescs = belief.pendingActions.map(
+      (a) => `${a.type}:${a.id} (${a.status})`,
+    );
+    parts.push(`Pending actions: ${actionDescs.join(', ')}.`);
   }
 
   return parts.join(' ');
