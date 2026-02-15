@@ -21,7 +21,7 @@ import { createLogger } from './logger.js';
 import { getConfig } from './config.js';
 import { Reasoner } from './reasoner.js';
 import { PersonaplexTTS } from './tts.js';
-import { beliefToPrompt } from './belief.js';
+import { beliefToPrompt, type BeliefState } from './belief.js';
 import { route, detectComplexity } from './coordinator.js';
 import {
   connectToPersonaplex,
@@ -49,6 +49,35 @@ interface SessionData {
 
 /** Turn silence threshold: flush transcript after this many ms of no new text tokens */
 const TURN_SILENCE_MS = 2500;
+
+/** Active WebSocket sessions — receives belief change notifications */
+const activeSessions = new Set<ServerWebSocket<SessionData>>();
+
+/** Send belief update metadata to all active sessions */
+function broadcastBeliefUpdate(belief: BeliefState): void {
+  const meta = JSON.stringify({
+    type: 'belief_update',
+    phase: belief.conversation.phase,
+    topic: belief.conversation.topic,
+    goals: belief.userModel.goals,
+    project: belief.userModel.currentProject,
+    pendingActions: belief.pendingActions.length,
+    prompt: beliefToPrompt(belief),
+  });
+  const metaBuf = Buffer.from(meta, 'utf-8');
+  const msg = Buffer.alloc(1 + metaBuf.length);
+  msg[0] = MSG.METADATA;
+  metaBuf.copy(msg, 1);
+
+  for (const ws of activeSessions) {
+    if (ws.readyState === 1) {
+      ws.sendBinary(msg);
+    }
+  }
+}
+
+// Wire up belief change listener
+reasoner.onBeliefChange(broadcastBeliefUpdate);
 
 const app = new Hono();
 
@@ -209,6 +238,9 @@ async function handleSessionOpen(ws: ServerWebSocket<SessionData>) {
       }
     };
 
+    // Track active session for belief broadcasts
+    activeSessions.add(ws);
+
     // Send handshake to client to signal ready
     ws.sendBinary(new Uint8Array([MSG.HANDSHAKE]));
     logger.info({ sessionId: data.sessionId }, 'Session active — PersonaPlex connected');
@@ -298,6 +330,7 @@ function handleSessionClose(ws: ServerWebSocket<SessionData>) {
   const data = ws.data;
   logger.info({ sessionId: data.sessionId }, 'Session closed');
 
+  activeSessions.delete(ws);
   if (data.turnTimer) clearTimeout(data.turnTimer);
 
   // Flush any remaining transcript to Reasoner
@@ -366,6 +399,17 @@ async function start() {
       },
     },
   });
+
+  // Periodic Letta memory sync — keeps belief fresh during active sessions
+  const SYNC_INTERVAL_MS = 30_000;
+  setInterval(async () => {
+    if (activeSessions.size === 0) return;
+    try {
+      await reasoner.syncBeliefFromLetta();
+    } catch {
+      // Non-critical — belief sync is best-effort
+    }
+  }, SYNC_INTERVAL_MS);
 
   logger.info({ port: server.port }, 'Voice Bridge listening');
   logger.info({

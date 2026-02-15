@@ -45,11 +45,22 @@ export function emptyBelief(): BeliefState {
   };
 }
 
+/** Phase-specific behavioral guidance for the Talker (PersonaPlex). */
+const PHASE_PROMPTS: Record<BeliefState['conversation']['phase'], string> = {
+  understanding:
+    'Listen actively. Ask clarifying questions. Help the user articulate what they want.',
+  planning:
+    'The user has goals. Help them refine their plan. Offer suggestions and confirm details before acting.',
+  action:
+    'A mission is running. Give status updates when asked. Stay focused on the current task.',
+};
+
 /** Convert belief state into a PersonaPlex text_prompt that primes the Talker. */
 export function beliefToPrompt(belief: BeliefState): string {
   const parts: string[] = [
     'You are a voice assistant for the VAOS autonomous operating system.',
     'Keep responses concise and natural for spoken conversation.',
+    PHASE_PROMPTS[belief.conversation.phase],
   ];
 
   if (belief.userModel.currentProject) {
@@ -73,6 +84,10 @@ export function beliefToPrompt(belief: BeliefState): string {
       (a) => `${a.type}:${a.id} (${a.status})`,
     );
     parts.push(`Pending actions: ${actionDescs.join(', ')}.`);
+  }
+
+  if (belief.userModel.barriers.length > 0) {
+    parts.push(`Known barriers: ${belief.userModel.barriers.join(', ')}.`);
   }
 
   return parts.join(' ');

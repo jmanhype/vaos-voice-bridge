@@ -71,3 +71,41 @@ export function route(text: string, belief: BeliefState, threshold: number): Rou
   logger.debug({ text: text.slice(0, 60), complexity, threshold, mode }, 'Routing decision');
   return mode;
 }
+
+/**
+ * Evaluate whether the conversation phase should transition.
+ * Called after each Reasoner interaction to cycle phases appropriately.
+ *
+ *   understanding → planning (when goals detected)
+ *   planning → action (when plan executed/mission submitted)
+ *   action → understanding (when actions complete or new topic starts)
+ */
+export function evaluatePhaseTransition(belief: BeliefState): BeliefState['conversation']['phase'] | null {
+  const { phase, turnsInPhase } = belief.conversation;
+  const hasGoals = belief.userModel.goals.length > 0;
+  const hasProject = belief.userModel.currentProject !== null;
+  const hasPendingActions = belief.pendingActions.length > 0;
+
+  switch (phase) {
+    case 'understanding':
+      // Move to planning when user has expressed goals
+      if (hasGoals && turnsInPhase >= 2) return 'planning';
+      break;
+
+    case 'planning':
+      // Move to action when missions are submitted
+      if (hasPendingActions) return 'action';
+      // Fall back to understanding if planning stalls
+      if (turnsInPhase > 5) return 'understanding';
+      break;
+
+    case 'action':
+      // Return to understanding when actions are done or topic shifts
+      if (!hasPendingActions && turnsInPhase >= 2) return 'understanding';
+      // Also reset if stuck in action too long
+      if (turnsInPhase > 8) return 'understanding';
+      break;
+  }
+
+  return null; // No transition
+}
