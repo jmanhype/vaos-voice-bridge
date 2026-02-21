@@ -25,6 +25,7 @@ import { Memory } from './memory.js';
 import { Trigger } from './trigger.js';
 import { Reasoner } from './reasoner.js';
 import { synthesize, readWavPcm } from './tts.js';
+import { getPricingPlans, getPricingPlan, trackConversionEvent, getExperimentInfo } from './pricing.js';
 
 const logger = createLogger('bridge');
 
@@ -623,6 +624,76 @@ function createApp(): Hono {
     // Emit as user text event (will route through Trigger → Reasoner)
     session.bus.emit(E.userText(session.id, `[SYSTEM] ${body.context}`));
     return c.json({ ok: true });
+  });
+
+  // ── Pricing Experiment Endpoints (Task cw-live-20260221-3) ──────────────────────
+
+  // GET /api/v1/pricing/plans — List all pricing tiers for current variant
+  app.get('/api/v1/pricing/plans', async (c) => {
+    try {
+      const plans = await getPricingPlans();
+      const experimentInfo = await getExperimentInfo();
+
+      return c.json({
+        plans,
+        experiment: experimentInfo,
+      });
+    } catch (err) {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to fetch pricing plans');
+      return c.json({ error: 'Failed to fetch pricing plans' }, 500);
+    }
+  });
+
+  // GET /api/v1/pricing/plans/:name — Get specific pricing tier
+  app.get('/api/v1/pricing/plans/:name', async (c) => {
+    try {
+      const planName = c.req.param('name');
+      const plan = await getPricingPlan(planName);
+
+      if (!plan) {
+        return c.json({ error: 'Plan not found' }, 404);
+      }
+
+      const experimentInfo = await getExperimentInfo();
+      return c.json({ plan, experiment: experimentInfo });
+    } catch (err) {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to fetch pricing plan');
+      return c.json({ error: 'Failed to fetch pricing plan' }, 500);
+    }
+  });
+
+  // POST /api/v1/pricing/events — Track conversion event
+  app.post('/api/v1/pricing/events', async (c) => {
+    try {
+      const body = await c.req.json<{ eventType: string; metadata?: Record<string, unknown> }>();
+
+      if (!body.eventType) {
+        return c.json({ error: 'eventType required' }, 400);
+      }
+
+      await trackConversionEvent(body.eventType, body.metadata);
+
+      return c.json({ ok: true });
+    } catch (err) {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to track conversion event');
+      return c.json({ error: 'Failed to track event' }, 500);
+    }
+  });
+
+  // GET /api/v1/pricing/experiment — Get current experiment info (for client-side A/B testing)
+  app.get('/api/v1/pricing/experiment', async (c) => {
+    try {
+      const info = await getExperimentInfo();
+
+      if (!info) {
+        return c.json({ enabled: false });
+      }
+
+      return c.json(info);
+    } catch (err) {
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to fetch experiment info');
+      return c.json({ error: 'Failed to fetch experiment info' }, 500);
+    }
   });
 
   return app;
