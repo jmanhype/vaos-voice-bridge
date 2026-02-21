@@ -1,0 +1,53 @@
+# Pricing Feature Flags Configuration
+# Controls pricing experiment variants and plan availability
+# Timestamp: 2026-02-21T15:40:00Z
+
+[pricing_experiment]
+enabled = true
+experiment_id = "cw-live-20260221-3"
+variant = "control" # Options: control | test_20pct_increase
+
+[pricing_plans]
+[[pricing_plans.tier]]
+name = "starter"
+description = "Voice bridge for personal projects"
+monthly_price_usd = 0
+max_concurrent_sessions = 1
+max_hours_per_month = 10
+features = ["basic_system1", "no_system2"]
+
+[[pricing_plans.tier]]
+name = "pro"
+description = "For developers building voice apps"
+monthly_price_usd = 49
+max_concurrent_sessions = 5
+max_hours_per_month = 100
+features = ["full_system1", "system2_access", "api_access", "priority_support"]
+
+[[pricing_plans.tier]]
+name = "enterprise"
+description = "Production voice infrastructure"
+monthly_price_usd = 499
+max_concurrent_sessions = 50
+max_hours_per_month = 1000
+features = ["full_system1", "system2_access", "api_access", "sla_support", "custom_integrations", "dedicated_support"]
+
+# Test variant: 20% price increase on paid tiers
+[pricing_plans.test_variant]
+pro_monthly_price_usd = 59 # Was 49
+enterprise_monthly_price_usd = 599 # Was 499
+
+[conversion_events]
+track_events = [
+  "pricing_page_view",
+  "plan_selected",
+  "checkout_started",
+  "payment_completed",
+  "subscription_activated",
+  "trial_converted"
+]
+
+[event_analytics]
+provider = "supabase"
+table_name = "conversion_events"
+retention_days = 90
